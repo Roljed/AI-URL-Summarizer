@@ -7,11 +7,14 @@ from dotenv import load_dotenv
 _PROJECT_ROOT = Path(__file__).resolve().parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
+from database import check_rate_limit, init_db
+
+init_db()
+
 from fastapi import BackgroundTasks, FastAPI, Form
 from twilio.rest import Client
 
 from agent import run_agent
-from database import check_rate_limit
 
 app = FastAPI(title="WhatsApp Agent Webhook Server")
 
