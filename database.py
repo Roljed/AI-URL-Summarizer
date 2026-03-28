@@ -12,6 +12,13 @@ def init_db():
             summary_json TEXT
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usage_logs (
+            id INTEGER PRIMARY KEY,
+            phone_number TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     return conn
 
@@ -43,3 +50,29 @@ def fetch_history_rows(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     # We use SQLite's internal rowid to get chronological insertion order
     cursor.execute("SELECT url, summary_json FROM summary_cache ORDER BY rowid ASC")
     return cursor.fetchall()
+
+
+def check_rate_limit(phone_number: str, max_requests: int = 10, hours: int = 12) -> bool:
+    conn = sqlite3.connect("agent_memory.db")
+    try:
+        cursor = conn.cursor()
+        modifier = f"-{hours} hours"
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM usage_logs
+            WHERE phone_number = ? AND timestamp >= datetime('now', ?)
+            """,
+            (phone_number, modifier),
+        )
+        row = cursor.fetchone()
+        count = int(row[0]) if row else 0
+        if count < max_requests:
+            cursor.execute(
+                "INSERT INTO usage_logs (phone_number) VALUES (?)",
+                (phone_number,),
+            )
+            conn.commit()
+            return True
+        return False
+    finally:
+        conn.close()

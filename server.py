@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, Form
 from twilio.rest import Client
 
 from agent import run_agent
+from database import check_rate_limit
 
 app = FastAPI(title="WhatsApp Agent Webhook Server")
 
@@ -87,11 +88,32 @@ def whatsapp_webhook(
     # BKM: We MUST capture the sender's phone number to reply to them!
     sender: str = Form(..., alias="From", description="The WhatsApp number of the sender."),
 ):
-# --- SECURITY GATE: Whitelist Check ---
+    # --- SECURITY GATE: Whitelist Check ---
     if sender not in ALLOWED_USERS:
         print(f"[Security] 🚫 Blocked unauthorized access from: {sender}")
         # BKM: We still return 200 OK so Meta doesn't think our server is broken and retry the webhook.
         return {"message": "Unauthorized user ignored."}
+
+    if not check_rate_limit(sender):
+        rate_msg = (
+            "⚠️ Rate Limit Exceeded: You have reached your limit of 10 requests per 12 hours. "
+            "Please try again later."
+        )
+        if twilio_client is not None and twilio_number:
+            try:
+                twilio_client.messages.create(
+                    body=rate_msg,
+                    from_=twilio_number,
+                    to=sender,
+                )
+                print(f"[System Log] 📱 Sent rate-limit notice to {sender}")
+            except Exception as e:
+                print(f"[System Log] ❌ Failed to send rate limit Twilio message: {e}")
+        else:
+            print(
+                "[System Log] ❌ Twilio is not configured; cannot send rate-limit WhatsApp notice."
+            )
+        return {"message": "Rate limited"}
 
     # If they pass the gate, queue the agent
     background_tasks.add_task(process_and_notify, body, sender)
